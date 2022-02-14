@@ -294,8 +294,6 @@ def main():
 (c) 2021 Yogesh Khatri,  @swiftforensics
 This script will read OneDrive sync logs. These logs are produced by OneDrive, 
 and are stored in a binary format having the extensions .odl .odlgz .oldsent .aold
-Provide the entire folder where the files are found, as some other files from
-there are required for full parsing.
 
 Sometimes the ObfuscationMap stores old and new values of Keys. By default, only 
 the latest value is fetched. Use -k option to get all possible values (values will 
