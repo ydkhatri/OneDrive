@@ -16,27 +16,32 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.2, 2022-02-13
+Version : 1.3, 2022-11-04
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
           specified, output will be saved in odl_folder. When
           extracting these files from an image, also extract the 
-          "ObfuscationStringMap.txt" file and put it in the odl_folder
-          which is its default location, or ideally save the entire
-          folder. Usually there is only one ObfuscationStringMap file
-          present in either the Business1 or Personal folder and .odl 
-          files in other folders use it too. 
+          "ObfuscationStringMap.txt" and "general.keystore" files and 
+          put them in the odl_folder which is its default location, or 
+          ideally save the entire folder. Usually there is only one 
+          ObfuscationStringMap file present in either the Business1 or 
+          Personal folder and .odl files in other folders use it too. 
+          There will be a different general.keystore file in each folder
+          that contains a ODL file, which can decrypt those files only,
+          and not ones in other folders.
 
 Requires python3.7+ and the construct module
 """
 
 import argparse
+import base64
 import csv
 import datetime
 import glob
 import gzip
 import io
+import json
 import os
 import re
 import string
@@ -44,13 +49,14 @@ import struct
 
 from construct import *
 from construct.core import Int32ul, Int64ul
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
 
 control_chars = ''.join(map(chr, range(0,32))) + ''.join(map(chr, range(127,160)))
 not_control_char_re = re.compile(f'[^{control_chars}]' + '{4,}')
 # If  we only want ascii, use 'ascii_chars_re' below
-printable_chars_for_re = string.printable.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
-ascii_chars_re = re.compile(f'[{printable_chars_for_re}]' + '{4,}')
-
+printable_chars_for_re = string.printable.replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]').encode()
+ascii_chars_re = re.compile(b'[{' + printable_chars_for_re + b'}]' + b'{4,}')
 
 def ReadUnixMsTime(unix_time_ms): # Unix millisecond timestamp
     '''Returns datetime object, or empty string upon error'''
@@ -110,6 +116,69 @@ def guess_encoding(obfuscation_map_path):
                 encoding = 'utf8'
     return encoding
 
+# UnObfuscation code
+key = ''
+utf_type = 'utf16'
+
+def decrypt(cipher_text):
+    '''cipher_text is expected to be base64 encoded'''
+    global key
+    global utf_type
+    
+    if key == '':
+        return ""
+    if len(cipher_text) < 22:
+        return "" # invalid 
+    # add proper base64 padding
+    remainder = len(cipher_text) % 4
+    if remainder == 1:
+        return "" # invalid b64
+    elif remainder in (2, 3):
+        cipher_text += "="* (4 - remainder)
+    try:
+        cipher_text = cipher_text.replace('_', '/').replace('-', '+')
+        cipher_text = base64.b64decode(cipher_text)
+    except:
+        return ""
+    
+    if len(cipher_text) % 16 != 0:
+        return ""
+    else:
+        pass
+
+    try:
+        cipher = AES.new(key, AES.MODE_CBC, iv=b'\0'*16)
+        raw = cipher.decrypt(cipher_text)
+    except ValueError as ex:
+        print('Exception while decrypting data', str(ex))
+        return ""
+    try:
+        plain_text = unpad(raw, 16)
+    except ValueError as ex:
+        #print("Error in unpad!", str(ex), raw)
+        return ""
+    try:
+        plain_text = plain_text.decode(utf_type)#, 'ignore')
+    except ValueError as ex:
+        print(f"Error decoding {utf_type}", str(ex))
+    return plain_text
+
+def read_keystore(keystore_path):
+    global key
+    global utf_type
+    encoding = guess_encoding(keystore_path)
+    with open(keystore_path, 'r', encoding=encoding) as f:
+        try:
+            j = json.load(f)
+            key = j[0]['Key']
+            version = j[0]['Version']
+            utf_type = 'utf32' if key.endswith('\\u0000\\u0000') else 'utf16'
+            print(f"Recovered Unobfuscation key {key}, version={version}, utf_type={utf_type}")
+            key = base64.b64decode(key)
+            if version != 1:
+                print(f'WARNING: Key version {version} is unsupported. This may not work. Contact the author if you see this to add support for this version.')
+        except ValueError as ex:
+            print("JSON error " + str(ex))
 
 def read_obfuscation_map(obfuscation_map_path, store_all_key_values):
     map = {}
@@ -146,7 +215,7 @@ def read_obfuscation_map(obfuscation_map_path, store_all_key_values):
     
 def tokenized_replace(string, map):
     output = ''
-    tokens = ':\\.@%#&*-+=|{}!?<>;:~()//"\''
+    tokens = ':\\.@%#&*|{}!?<>;:~()//"\''
     parts = [] # [ ('word', 1), (':', 0), ..] word=1, token=0
     last_word = ''
     last_token = ''
@@ -178,20 +247,33 @@ def tokenized_replace(string, map):
             output += part[0]
         else: # word
             word = part[0]
-            if word in map:
+            decrypted_word = decrypt(word)
+            if decrypted_word:
+                output += decrypted_word
+            elif word in map:
                 output += map[word]
             else:
                 output += word
     return output
 
-def extract_strings(data, map):
+def extract_strings(data, map, unobfuscate=True):
     extracted = []
     #for match in not_control_char_re.finditer(data): # This gets all unicode chars, can include lot of garbage if you only care about English, will miss out other languages
     for match in ascii_chars_re.finditer(data): # Matches ONLY Ascii (old behavior) , good if you only care about English
-        x = match.group().rstrip('\n').rstrip('\r')
-        x.replace('\r', '').replace('\n', ' ')
-        x = tokenized_replace(x, map)
-        extracted.append(x)
+        text = match.group()
+        if match.start() >= 4:
+            match_len = match.end() - match.start()
+            y = data[match.start() - 4 : match.start()]
+            stored_len = struct.unpack('<I', y)[0]
+            if match_len - stored_len <= 5:
+                x = text[0:stored_len].decode('utf8', 'ignore')
+                x = x.rstrip('\n').rstrip('\r')
+                x.replace('\r', '').replace('\n', ' ')
+                if unobfuscate:
+                    x = tokenized_replace(x, map)
+                extracted.append(x)
+            else:
+                print('invalid match - not text ', match_len - stored_len, text)
 
     if len(extracted) == 0:
         extracted = ''
@@ -249,21 +331,19 @@ def process_odl(path, map, show_all_data):
             if data_pos < header.data_len:
                 params = data[data_pos:]
                 try:
-                    params = params.decode('utf8', 'ignore')
-                except Exception as ex:
-                    print(ex)
-                try:
-                    #strings = extract_strings(params, {})
                     strings_decoded = extract_strings(params, map)
+                    #strings_decoded_obfuscated = extract_strings(params, map, False) # for debug only
                     #print(strings)
                 except Exception as ex:
                     print(ex)
             else:
                 strings_decoded = ''
+                # strings_decoded_obfuscated = '' # for debug only
             #odl['Params'] = strings
             odl['Code_File'] = code_file_name
             odl['Function'] = code_function_name
             odl['Params_Decoded'] = strings_decoded
+            #odl['Params_Obfuscated'] = strings_decoded_obfuscated  # for debug only
             #print(basename, i, timestamp, code_file_name, code_function_name, strings)
             if show_all_data:
                 odl_rows.append(odl)
@@ -291,16 +371,21 @@ def process_odl(path, map, show_all_data):
 def main():
     usage = \
     """
-(c) 2021 Yogesh Khatri,  @swiftforensics
-This script will read OneDrive sync logs. These logs are produced by OneDrive, 
-and are stored in a binary format having the extensions .odl .odlgz .oldsent .aold
+(c) 2022 Yogesh Khatri,  @swiftforensics
+This script will read OneDrive sync logs. These logs are produced by 
+OneDrive, and are stored in a binary format having the extensions 
+.odl .odlgz .oldsent .aold
 
-Sometimes the ObfuscationMap stores old and new values of Keys. By default, only 
-the latest value is fetched. Use -k option to get all possible values (values will 
-be | delimited). 
+Sometimes the ObfuscationMap stores old and new values of Keys. By 
+default, only the latest value is fetched. Use -k option to get all 
+possible values (values will be | delimited). 
 
-By default, irrelevant functions and/or those with empty parameters are not displayed.
-This can be toggled with the -d option.
+Newer versions of OneDrive since at least April 2022 do not use the
+ObfuscationStringMap file. Data to be obfuscated is now AES encrypted
+with the key stored in the file general.keystore
+
+By default, irrelevant functions and/or those with empty parameters 
+are not displayed. This can be toggled with the -d option.
     """
 
     parser = argparse.ArgumentParser(description='OneDrive Log (ODL) reader', epilog=usage, 
@@ -330,12 +415,17 @@ This can be toggled with the -d option.
         obfuscation_map_path = os.path.join(odl_folder, "ObfuscationStringMap.txt")
 
     if not os.path.exists(obfuscation_map_path):
-        print(f'"ObfuscationStringMap.txt" not found in {odl_folder}. Cannot proceed!')
-        print('Please specify the path to ObfuscationStringMap.txt (with -s option), it may be in either the Business1 or Personal folder')
-        return
+        print(f'"ObfuscationStringMap.txt" not found in {odl_folder}.')
+        map = {}
     else:
         map = read_obfuscation_map(obfuscation_map_path, args.all_key_values)
         print(f'Read {len(map)} items from map')
+    
+    keystore_path = os.path.join(odl_folder, "general.keystore")
+    if not os.path.exists(keystore_path):
+        print(f'"general.keystore" not found in {odl_folder}. WARNING: Strings will not be decoded!!')
+    else:
+        read_keystore(keystore_path)
 
     try:
         fieldnames = 'Filename,File_Index,Timestamp,Code_File,Function,Params_Decoded'.split(',')
