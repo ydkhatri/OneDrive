@@ -6,7 +6,7 @@ A parser for OneDrive .odl files.
 MIT
 
 ## Requirements & Installation
-Python 3.6+ and the following modules
+Python 3.7+ and the following modules
 - construct
 
 ## Usage
@@ -21,11 +21,14 @@ On macOS, they will usually be under:
 - /Users/<USER>/Library/Logs/OneDrive/Personal
 - /Users/<USER>/Library/Logs/OneDrive/Common
   
-In addition to odl logs, there should be a file named ObfuscationStringMap.txt. This file is needed to unobfuscate strings. There is usually only one of these files per OneDrive installation, either in the Personal or Business1 folder, but it is used by all odl logs. You will need to provide the path of this file to the script too (if it is not in the same folder as .odl files).
+In addition to odl logs, there should be a file named `ObfuscationStringMap.txt`. This file is needed to unobfuscate strings. There is usually only one of these files per OneDrive installation, either in the Personal or Business1 folder, but it is used by all odl logs. You will need to provide the path of this file to the script too (if it is not in the same folder as .odl files).
+
+In newer versions since April 2022, there might not be an ObfuscationStringMap.txt file. Instead you now need the `general.keystore` (in the same location) to unobfuscate strings.
 
 ```
 % python3 odl.py -h                                                   
-usage: odl.py [-h] [-o OUTPUT_PATH] [-s OBFUSCATIONSTRINGMAP_PATH] [-k] [-d] odl_folder
+usage: odl.py [-h] [-o OUTPUT_PATH] [-s OBFUSCATIONSTRINGMAP_PATH] [-k] [-d]
+              odl_folder
 
 OneDrive Log (ODL) reader
 
@@ -41,22 +44,28 @@ optional arguments:
   -k, --all_key_values  For repeated keys in ObfuscationMap, get all values | delimited (off by default)
   -d, --all_data        Show all data (off by default)
 
-(c) 2021 Yogesh Khatri,  @swiftforensics
-This script will read OneDrive sync logs. These logs are produced by OneDrive, 
-and are stored in a binary format having the extensions .odl .odlgz .oldsent .aold
+(c) 2022 Yogesh Khatri,  @swiftforensics
+This script will read OneDrive sync logs. These logs are produced by 
+OneDrive, and are stored in a binary format having the extensions 
+.odl .odlgz .oldsent .aold
 
-Sometimes the ObfuscationMap stores old and new values of Keys. By default, only 
-the latest value is fetched. Use -k option to get all possible values (values will 
-be | delimited). 
+Sometimes the ObfuscationMap stores old and new values of Keys. By 
+default, only the latest value is fetched. Use -k option to get all 
+possible values (values will be | delimited). 
 
-By default, irrelevant functions and/or those with empty parameters are not displayed.
-This can be toggled with the -d option.
+Newer versions of OneDrive since at least April 2022 do not use the
+ObfuscationStringMap file. Data to be obfuscated is now AES encrypted
+with the key stored in the file general.keystore
+
+By default, irrelevant functions and/or those with empty parameters 
+are not displayed. This can be toggled with the -d option.
 ```
 
 ### Example
 ```
-% python3 odl.py -o ~/Desktop/odl_output.csv -s ~/Desktop/testing/ObfuscationStringMap.txt ~/Desktop/testing
+% python3 odl.py -o ~/Desktop/odl_output.csv ~/Desktop/testing
 WARNING: Multiple instances of some keys were found in the ObfuscationMap.
+Recovered Unobfuscation key Mfv+fea23ca234VpoEc63Vawq+dae82uUKc=, version=1, utf_type=utf16
 Read 26401 items from map
 Searching  /Users/ykhatri/Desktop/testing/SyncEngine-2022-02-13.0355.840.786.odlgz
 Wrote 1 rows
