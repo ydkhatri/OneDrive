@@ -17,7 +17,7 @@ a user under the following paths on Windows :
 - \AppData\Local\Microsoft\OneDrive\logs\Business1
 - \AppData\Local\Microsoft\OneDrive\logs\Personal
 
-On macOS, it is reported to be under:
+On macOS, they are under:
 - /Users/<USER>/Library/Logs/OneDrive/Business1
 - /Users/<USER>/Library/Logs/OneDrive/Personal
 - /Users/<USER>/Library/Logs/OneDrive/Common
