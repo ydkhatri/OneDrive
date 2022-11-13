@@ -8,6 +8,7 @@ MIT
 ## Requirements & Installation
 Python 3.7+ and the following modules
 - construct
+- pycryptodome
 
 ## Usage
 OneDrive logs are stored as binary files with extensions .odl,
@@ -16,10 +17,13 @@ a user under the following paths on Windows :
 - \AppData\Local\Microsoft\OneDrive\logs\Business1
 - \AppData\Local\Microsoft\OneDrive\logs\Personal
 
-On macOS, they will usually be under:
+On macOS, it is reported to be under:
 - /Users/<USER>/Library/Logs/OneDrive/Business1
 - /Users/<USER>/Library/Logs/OneDrive/Personal
 - /Users/<USER>/Library/Logs/OneDrive/Common
+On some macOS, they may be here:
+- /Users/<USER>/Library/Containers/com.microsoft.OneDrive-mac/Data/Library/Logs
+
   
 In addition to odl logs, there should be a file named `ObfuscationStringMap.txt`. This file is needed to unobfuscate strings. There is usually only one of these files per OneDrive installation, either in the Personal or Business1 folder, but it is used by all odl logs. You will need to provide the path of this file to the script too (if it is not in the same folder as .odl files).
 
