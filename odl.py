@@ -1,5 +1,5 @@
 """
-(c) 2021 Yogesh Khatri, @SwiftForensics 
+(c) 2021-2023 Yogesh Khatri, @SwiftForensics 
 
 Read OneDrive .ODL files
 ------------------------
@@ -16,7 +16,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.3, 2022-11-04
+Version : 1.4, 2023-02-04
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -300,13 +300,13 @@ def process_odl(path, map, show_all_data):
                 file_data = gzip.decompress(f.read())
             except (gzip.BadGzipFile,OSError) as ex:
                 print('..decompression error for file {path} ' + str(ex))
-                return
+                return odl_rows
             f.close()
             f = io.BytesIO(file_data)
             header = f.read(8)
         if header != b'\xCC\xDD\xEE\xFF\0\0\0\0': # CDEF header
             print('wrong header! Did not find 0xCCDDEEFF')
-            return
+            return odl_rows
         else:
             f.seek(-8, io.SEEK_CUR)
             header = f.read(56) # odl complete header is 56 bytes
@@ -445,8 +445,11 @@ are not displayed. This can be toggled with the -d option.
         try:
             odl_rows = process_odl(path, map, args.all_data)
             try:
-                writer.writerows(odl_rows)
-                print(f'Wrote {len(odl_rows)} rows')
+                if odl_rows:
+                    writer.writerows(odl_rows)
+                    print(f'Wrote {len(odl_rows)} rows')
+                else:
+                    print("No log data was found in this file.")
             except Exception as ex:
                 print("ERROR writing rows:", type(ex), ex)
         except OSError as ex:
