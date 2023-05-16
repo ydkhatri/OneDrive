@@ -16,7 +16,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.4, 2023-02-04
+Version : 1.5, 2023-05-15
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -39,13 +39,13 @@ import base64
 import csv
 import datetime
 import glob
-import gzip
 import io
 import json
 import os
 import re
 import string
 import struct
+import zlib
 
 from construct import *
 from construct.core import Int32ul, Int64ul
@@ -297,8 +297,11 @@ def process_odl(path, map, show_all_data):
         if header[0:4] == b'\x1F\x8B\x08\x00': # gzip
             try:
                 f.seek(file_pos - 8)
-                file_data = gzip.decompress(f.read())
-            except (gzip.BadGzipFile,OSError) as ex:
+                all_data = f.read()
+                z = zlib.decompressobj(31)
+                file_data = z.decompress(all_data)
+                #print(f"zlib decompressed {len(file_data)} bytes")
+            except (zlib.error, OSError) as ex:
                 print('..decompression error for file {path} ' + str(ex))
                 return odl_rows
             f.close()
@@ -310,7 +313,7 @@ def process_odl(path, map, show_all_data):
         else:
             f.seek(-8, io.SEEK_CUR)
             header = f.read(56) # odl complete header is 56 bytes
-        while header:
+        while header and len(header) == 56:
             odl = {
                 'Filename' : basename,
                 'File_Index' : i,
@@ -322,6 +325,9 @@ def process_odl(path, map, show_all_data):
             header = CDEF.parse(header)
             timestamp = ReadUnixMsTime(header.timestamp)
             odl['Timestamp'] = timestamp
+            if header.data_len <= 4:
+                #print('Empty data len, skipping')
+                break
             data = f.read(header.data_len)
             data_pos, code_file_name = read_string(data)
             flags = struct.unpack('<I', data[data_pos : data_pos + 4])[0]
