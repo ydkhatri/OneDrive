@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 (c) 2021-2023 Yogesh Khatri, @SwiftForensics 
 
