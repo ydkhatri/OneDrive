@@ -18,11 +18,12 @@ a user under the following paths on Windows :
 - \AppData\Local\Microsoft\OneDrive\logs\Personal
 
 On macOS, they are under:
-- /Users/<USER>/Library/Logs/OneDrive/Business1
-- /Users/<USER>/Library/Logs/OneDrive/Personal
-- /Users/<USER>/Library/Logs/OneDrive/Common
+- /Users/\<USER>/Library/Logs/OneDrive/Business1
+- /Users/\<USER>/Library/Logs/OneDrive/Personal
+- /Users/\<USER>/Library/Logs/OneDrive/Common  
+  
 On some macOS, they may be here:
-- /Users/<USER>/Library/Containers/com.microsoft.OneDrive-mac/Data/Library/Logs
+- /Users/\<USER>/Library/Containers/com.microsoft.OneDrive-mac/Data/Library/Logs
 
   
 In addition to odl logs, there should be a file named `ObfuscationStringMap.txt`. This file is needed to unobfuscate strings. There is usually only one of these files per OneDrive installation, either in the Personal or Business1 folder, but it is used by all odl logs. You will need to provide the path of this file to the script too (if it is not in the same folder as .odl files).
