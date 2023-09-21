@@ -17,7 +17,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.6, 2023-09-21
+Version : 1.7, 2023-09-21
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -136,43 +136,44 @@ def decrypt(cipher_text):
     '''cipher_text is expected to be base64 encoded'''
     global key
     global utf_type
+
+    cipher_text_orig = cipher_text
     
     if key == '':
-        return ""
+        return cipher_text_orig
     if len(cipher_text) < 22:
-        return "" # invalid 
+        return cipher_text_orig # invalid or it was not encrypted!
     # add proper base64 padding
     remainder = len(cipher_text) % 4
     if remainder == 1:
-        return "" # invalid b64
+        return cipher_text_orig # invalid b64 or it was not encrypted!
     elif remainder in (2, 3):
         cipher_text += "="* (4 - remainder)
     try:
         cipher_text = cipher_text.replace('_', '/').replace('-', '+')
         cipher_text = base64.b64decode(cipher_text)
     except:
-        return ""
+        return cipher_text_orig
     
     if len(cipher_text) % 16 != 0:
-        return ""
-    else:
-        pass
+        return cipher_text_orig
 
     try:
         cipher = AES.new(key, AES.MODE_CBC, iv=b'\0'*16)
         raw = cipher.decrypt(cipher_text)
     except ValueError as ex:
         print('Exception while decrypting data', str(ex))
-        return ""
+        return cipher_text_orig
     try:
         plain_text = unpad(raw, 16)
     except ValueError as ex:
         #print("Error in unpad!", str(ex), raw)
-        return ""
+        return cipher_text_orig
     try:
         plain_text = plain_text.decode(utf_type)#, 'ignore')
     except ValueError as ex:
-        print(f"Error decoding {utf_type}", str(ex))
+        #print(f"Error decoding {utf_type}", str(ex))
+        return cipher_text_orig
     return plain_text
 
 def read_keystore(keystore_path):
@@ -455,7 +456,12 @@ are not displayed. This can be toggled with the -d option.
     
     keystore_path = os.path.join(odl_folder, "general.keystore")
     if not os.path.exists(keystore_path):
-        print(f'"general.keystore" not found in {odl_folder}. WARNING: Strings will not be decoded!!')
+        # Try new path
+        keystore_path = os.path.join(odl_folder, "EncryptionKeyStoreCopy", "general.keystore")
+        if not os.path.exists(keystore_path):
+            print(f'"general.keystore" not found in {odl_folder}. WARNING: Strings will not be decoded!!')
+        else:
+            read_keystore(keystore_path)
     else:
         read_keystore(keystore_path)
 
