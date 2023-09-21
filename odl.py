@@ -17,7 +17,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.5, 2023-05-15
+Version : 1.6, 2023-09-21
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -71,7 +71,7 @@ def ReadUnixMsTime(unix_time_ms): # Unix millisecond timestamp
             pass
     return ''
 
-CDEF = Struct(
+CDEF_V2 = Struct(
     "signature" / Int64ul, # CCDDEEFF00000000
     "timestamp" / Int64ul,
     "unk1" / Int32ul,
@@ -83,9 +83,20 @@ CDEF = Struct(
     # followed by Data
 )
 
+CDEF_V3 = Struct(
+    "signature" / Int64ul, # CCDDEEFF00000000
+    "timestamp" / Int64ul,
+    "unk1" / Int32ul,
+    "unk2" / Int32ul,
+    "data_len" / Int32ul,
+    "unknown" / Byte[16],
+    "one" / Int32ul       # 1
+    # followed by Data
+)
+
 Odl_header = Struct(
-    "signature" / Int64ul, # EBFGONED
-    "unk_version" / Int32ul,
+    "signature" / Bytes(8), # 'EBFGONED'
+    "odl_version" / Int32ul,
     "unknown_2" / Int32ul,
     "unknown_3" / Int64ul,
     "unknown_4" / Int32ul,
@@ -285,16 +296,20 @@ def extract_strings(data, map, unobfuscate=True):
 def process_odl(path, map, show_all_data):
     odl_rows = []
     basename = os.path.basename(path)
+    odl_version = 2 # default
     with open(path, 'rb') as f:
         i = 1
-        header = f.read(8)
+        file_header = f.read(0x100)
+        odl_header = Odl_header.parse(file_header)
+        odl_version = odl_header.odl_version
+        header = odl_header.signature
         if header[0:8] == b'EBFGONED': # Odl header
             f.seek(0x100)
             header = f.read(8)
             file_pos = 0x108
         else:
             file_pos = 8
-        # Now either we have the gzip header here or the CDEF header (compressed or uncompressed handles both)
+        # Now either we have the gzip header here or the CDEF_xx header (compressed or uncompressed handles both)
         if header[0:4] == b'\x1F\x8B\x08\x00': # gzip
             try:
                 f.seek(file_pos - 8)
@@ -303,12 +318,12 @@ def process_odl(path, map, show_all_data):
                 file_data = z.decompress(all_data)
                 #print(f"zlib decompressed {len(file_data)} bytes")
             except (zlib.error, OSError) as ex:
-                print('..decompression error for file {path} ' + str(ex))
+                print(f'..decompression error for file {path} ' + str(ex))
                 return odl_rows
             f.close()
             f = io.BytesIO(file_data)
             header = f.read(8)
-        if header != b'\xCC\xDD\xEE\xFF\0\0\0\0': # CDEF header
+        if header != b'\xCC\xDD\xEE\xFF\0\0\0\0': # CDEF_Vx header
             print('wrong header! Did not find 0xCCDDEEFF')
             return odl_rows
         else:
@@ -323,19 +338,29 @@ def process_odl(path, map, show_all_data):
                 'Function' : '',
                 'Params_Decoded' : ''
             }
-            header = CDEF.parse(header)
+            if odl_version == 2:
+                header = CDEF_V2.parse(header)
+            elif odl_version == 3:
+                header = CDEF_V3.parse(header)
+            else:
+                print(f'Unknown odl_version = {odl_version}')
+                return odl_rows
             timestamp = ReadUnixMsTime(header.timestamp)
             odl['Timestamp'] = timestamp
             if header.data_len <= 4:
                 #print('Empty data len, skipping')
                 break
-            data = f.read(header.data_len)
+            if odl_version == 3:
+                header_data_len = header.data_len - 24
+            else:
+                header_data_len = header.data_len
+            data = f.read(header_data_len)
             data_pos, code_file_name = read_string(data)
             flags = struct.unpack('<I', data[data_pos : data_pos + 4])[0]
             data_pos += 4
             temp_pos, code_function_name = read_string(data[data_pos:])
             data_pos += temp_pos
-            if data_pos < header.data_len:
+            if data_pos < header_data_len:
                 params = data[data_pos:]
                 try:
                     strings_decoded = extract_strings(params, map)
@@ -371,14 +396,14 @@ def process_odl(path, map, show_all_data):
                 else:
                     odl_rows.append(odl)
             i += 1
-            file_pos += header.data_len
+            file_pos += header_data_len
             header = f.read(56) # next cdef header
     return odl_rows
 
 def main():
     usage = \
     """
-(c) 2022 Yogesh Khatri,  @swiftforensics
+(c) 2021-2023 Yogesh Khatri,  @swiftforensics
 This script will read OneDrive sync logs. These logs are produced by 
 OneDrive, and are stored in a binary format having the extensions 
 .odl .odlgz .oldsent .aold
