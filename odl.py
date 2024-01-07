@@ -105,6 +105,10 @@ Odl_header = Struct(
     "reserved" / Byte[0x64]
 )
 
+def is_file_empty(file_path):
+    '''Check if file is empty by confirming if its size is 0 bytes'''
+    return os.path.exists(file_path) and os.stat(file_path).st_size == 0
+
 def read_string(data):
     '''read string, return tuple (bytes_consumed, string)'''
     if (len(data)) >= 4:
@@ -480,19 +484,22 @@ are not displayed. This can be toggled with the -d option.
         paths.extend(glob.glob(os.path.join(odl_folder, pattern)))
     for path in paths:
         print("Searching ", path)
-        try:
-            odl_rows = process_odl(path, map, args.all_data)
+        if is_file_empty(path):
+            print("File is empty, file size is 0 bytes")
+        else:
             try:
-                if odl_rows:
-                    writer.writerows(odl_rows)
-                    print(f'Wrote {len(odl_rows)} rows')
-                else:
-                    print("No log data was found in this file.")
-            except Exception as ex:
-                print("ERROR writing rows:", type(ex), ex)
-        except OSError as ex:
-            print(f"Error - File not found! {path}")
-        
+                odl_rows = process_odl(path, map, args.all_data)
+                try:
+                    if odl_rows:
+                        writer.writerows(odl_rows)
+                        print(f'Wrote {len(odl_rows)} rows')
+                    else:
+                        print("No log data was found in this file.")
+                except Exception as ex:
+                    print("ERROR writing rows:", type(ex), ex)
+            except OSError as ex:
+                print(f"Error - File not found! {path}")
+
     csv_f.close()
     print(f'Finished processing files, output is at {csv_file_path}')
 
