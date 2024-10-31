@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""
-(c) 2021-2023 Yogesh Khatri, @SwiftForensics 
+r"""
+(c) 2021-2024 Yogesh Khatri, @SwiftForensics 
 
 Read OneDrive .ODL files
 ------------------------
@@ -17,7 +17,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.8, 2024-01-08
+Version : 1.9, 2024-11-01
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -32,7 +32,7 @@ Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           that contains a ODL file, which can decrypt those files only,
           and not ones in other folders.
 
-Requires python3.7+ and the construct module
+Requires python3.7+ and the modules pycryptodome and construct
 """
 
 import argparse
