@@ -140,44 +140,42 @@ def decrypt(cipher_text):
     '''cipher_text is expected to be base64 encoded'''
     global key
     global utf_type
-
-    cipher_text_orig = cipher_text
     
     if key == '':
-        return cipher_text_orig
+        return ''
     if len(cipher_text) < 22:
-        return cipher_text_orig # invalid or it was not encrypted!
+        return '' # invalid or it was not encrypted!
     # add proper base64 padding
     remainder = len(cipher_text) % 4
     if remainder == 1:
-        return cipher_text_orig # invalid b64 or it was not encrypted!
+        return '' # invalid b64 or it was not encrypted!
     elif remainder in (2, 3):
         cipher_text += "="* (4 - remainder)
     try:
         cipher_text = cipher_text.replace('_', '/').replace('-', '+')
         cipher_text = base64.b64decode(cipher_text)
     except:
-        return cipher_text_orig
+        return ''
     
     if len(cipher_text) % 16 != 0:
-        return cipher_text_orig
+        return ''
 
     try:
         cipher = AES.new(key, AES.MODE_CBC, iv=b'\0'*16)
         raw = cipher.decrypt(cipher_text)
     except ValueError as ex:
         print('Exception while decrypting data', str(ex))
-        return cipher_text_orig
+        return ''
     try:
         plain_text = unpad(raw, 16)
     except ValueError as ex:
         #print("Error in unpad!", str(ex), raw)
-        return cipher_text_orig
+        return ''
     try:
         plain_text = plain_text.decode(utf_type)#, 'ignore')
     except ValueError as ex:
         #print(f"Error decoding {utf_type}", str(ex))
-        return cipher_text_orig
+        return ''
     return plain_text
 
 def read_keystore(keystore_path):
