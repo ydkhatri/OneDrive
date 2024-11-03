@@ -49,7 +49,7 @@ optional arguments:
   -k, --all_key_values  For repeated keys in ObfuscationMap, get all values | delimited (off by default)
   -d, --all_data        Show all data (off by default)
 
-(c) 2022 Yogesh Khatri,  @swiftforensics
+(c) 2021-2024 Yogesh Khatri,  @swiftforensics
 This script will read OneDrive sync logs. These logs are produced by 
 OneDrive, and are stored in a binary format having the extensions 
 .odl .odlgz .oldsent .aold

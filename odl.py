@@ -17,7 +17,7 @@ On macOS, they will usually be under:
 
 Author  : Yogesh Khatri, yogesh@swiftforensics.com
 License : MIT
-Version : 1.9, 2024-11-01
+Version : 2.0, 2024-11-03
 Usage   : odl.py [-o OUTPUT_PATH] [-k] [-d] [-s obfuscationmap.txt] odl_folder
           odl_folder is the path to folder where .odl and .odlgz
           are stored. OUTPUT_PATH is optional, if not
@@ -49,7 +49,7 @@ import struct
 import zlib
 
 from construct import *
-from construct.core import Int32ul, Int64ul
+from construct.core import Int16ul, Int32ul, Int64ul
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
@@ -72,7 +72,8 @@ def ReadUnixMsTime(unix_time_ms): # Unix millisecond timestamp
     return ''
 
 CDEF_V2 = Struct(
-    "signature" / Int64ul, # CCDDEEFF00000000
+    "signature" / Const(b"\xCC\xDD\xEE\xFF"), #/ Int32ul, # CCDDEEFF
+    "unknown_flag" / Int32ul,
     "timestamp" / Int64ul,
     "unk1" / Int32ul,
     "unk2" / Int32ul,
@@ -84,13 +85,14 @@ CDEF_V2 = Struct(
 )
 
 CDEF_V3 = Struct(
-    "signature" / Int64ul, # CCDDEEFF00000000
+    "signature" / Const(b"\xCC\xDD\xEE\xFF"), #/ Int32ul, # CCDDEEFF
+    "context_data_len" / Int16ul,
+    "unknown_flag" / Int16ul,
     "timestamp" / Int64ul,
     "unk1" / Int32ul,
     "unk2" / Int32ul,
     "data_len" / Int32ul,
-    "unknown" / Byte[16],
-    "one" / Int32ul       # 1
+    "reserved" / Int32ul,  # 0
     # followed by Data
 )
 
@@ -296,42 +298,12 @@ def extract_strings(data, map, unobfuscate=True):
         extracted = extracted[0]
     return extracted
 
-def process_odl(path, map, show_all_data):
+def process_odl_v2(path, map, show_all_data, f, basename):
+    i = 1
     odl_rows = []
-    basename = os.path.basename(path)
-    odl_version = 2 # default
-    with open(path, 'rb') as f:
-        i = 1
-        file_header = f.read(0x100)
-        odl_header = Odl_header.parse(file_header)
-        odl_version = odl_header.odl_version
-        header = odl_header.signature
-        if header[0:8] == b'EBFGONED': # Odl header
-            f.seek(0x100)
-            header = f.read(8)
-            file_pos = 0x108
-        else:
-            file_pos = 8
-        # Now either we have the gzip header here or the CDEF_xx header (compressed or uncompressed handles both)
-        if header[0:4] == b'\x1F\x8B\x08\x00': # gzip
-            try:
-                f.seek(file_pos - 8)
-                all_data = f.read()
-                z = zlib.decompressobj(31)
-                file_data = z.decompress(all_data)
-                #print(f"zlib decompressed {len(file_data)} bytes")
-            except (zlib.error, OSError) as ex:
-                print(f'..decompression error for file {path} ' + str(ex))
-                return odl_rows
-            f.close()
-            f = io.BytesIO(file_data)
-            header = f.read(8)
-        if header != b'\xCC\xDD\xEE\xFF\0\0\0\0': # CDEF_Vx header
-            print('wrong header! Did not find 0xCCDDEEFF')
-            return odl_rows
-        else:
-            f.seek(-8, io.SEEK_CUR)
-            header = f.read(56) # odl complete header is 56 bytes
+    header = f.read(56) # odl complete header is 56 bytes for v2
+    file_pos = f.tell()
+    try:
         while header and len(header) == 56:
             odl = {
                 'Filename' : basename,
@@ -341,22 +313,13 @@ def process_odl(path, map, show_all_data):
                 'Function' : '',
                 'Params_Decoded' : ''
             }
-            if odl_version == 2:
-                header = CDEF_V2.parse(header)
-            elif odl_version == 3:
-                header = CDEF_V3.parse(header)
-            else:
-                print(f'Unknown odl_version = {odl_version}')
-                return odl_rows
+            header = CDEF_V2.parse(header)
             timestamp = ReadUnixMsTime(header.timestamp)
             odl['Timestamp'] = timestamp
             if header.data_len <= 4:
                 #print('Empty data len, skipping')
                 break
-            if odl_version == 3:
-                header_data_len = header.data_len - 24
-            else:
-                header_data_len = header.data_len
+            header_data_len = header.data_len
             data = f.read(header_data_len)
             data_pos, code_file_name = read_string(data)
             flags = struct.unpack('<I', data[data_pos : data_pos + 4])[0]
@@ -401,12 +364,143 @@ def process_odl(path, map, show_all_data):
             i += 1
             file_pos += header_data_len
             header = f.read(56) # next cdef header
+            file_pos += 56
+    except (ConstructError,ConstError) as ex:
+        print(f"Exception reading structure: {ex} at filepos {file_pos} i={i}")
+    return odl_rows
+
+def process_odl_v3(path, map, show_all_data, f, basename):
+    i = 1
+    odl_rows = []
+    header = f.read(32) # odl complete header is 32 bytes for v3
+    file_pos = f.tell()
+
+    try:
+        while header and len(header) == 32:
+            odl = {
+                'Filename' : basename,
+                'File_Index' : i,
+                'Timestamp' : None,
+                'Code_File' : '',
+                'Function' : '',
+                'Params_Decoded' : ''
+            }
+            #if i==67:
+            #    print("")
+            header = CDEF_V3.parse(header)
+            timestamp = ReadUnixMsTime(header.timestamp)
+            odl['Timestamp'] = timestamp
+            if header.data_len <= 4:
+                #print('Empty data len, skipping')
+                break
+            header_context_data_len = header.context_data_len
+            if header_context_data_len == 0:
+                f.seek(24, io.SEEK_CUR) # skipping the guid and other unknown fields
+                file_pos += 24
+                header_data_len = header.data_len - 24
+            else: 
+                context_data = f.read(header_context_data_len)
+                file_pos += header_context_data_len
+                header_data_len = header.data_len - header_context_data_len
+            data = f.read(header_data_len)
+            file_pos += header_data_len
+            data_pos, code_file_name = read_string(data)
+            flags = struct.unpack('<I', data[data_pos : data_pos + 4])[0]
+            data_pos += 4
+            temp_pos, code_function_name = read_string(data[data_pos:])
+            data_pos += temp_pos
+            if data_pos < header_data_len:
+                params = data[data_pos:]
+                try:
+                    strings_decoded = extract_strings(params, map)
+                    #strings_decoded_obfuscated = extract_strings(params, map, False) # for debug only
+                    #print(strings)
+                except Exception as ex:
+                    print(ex)
+            else:
+                strings_decoded = ''
+                # strings_decoded_obfuscated = '' # for debug only
+            #odl['Params'] = strings
+            odl['Code_File'] = code_file_name
+            odl['Function'] = code_function_name
+            odl['Params_Decoded'] = strings_decoded
+            #odl['Params_Obfuscated'] = strings_decoded_obfuscated  # for debug only
+            #print(basename, i, timestamp, code_file_name, code_function_name, strings)
+            if show_all_data:
+                odl_rows.append(odl)
+            else: # filter out irrelevant
+                # cache.cpp Find function provides no value, as search term or result is not present
+                if code_function_name == 'Find' and odl['Code_File'] == 'cache.cpp':
+                    pass
+                elif code_function_name == 'RecordCallTimeTaken' and odl['Code_File'] == 'AclHelper.cpp':
+                    pass
+                elif code_function_name == 'UpdateSyncStatusText' and odl['Code_File'] == 'ActivityCenterHeaderModel.cpp':
+                    pass
+                elif code_function_name == 'FireEvent' and odl['Code_File'] == 'EventMachine.cpp':
+                    pass
+                elif odl['Code_File'] in ('LogUploader2.cpp', 'LogUploader.cpp', 'ServerRefreshState.cpp', 'SyncTelemetry.cpp'):
+                    pass
+                elif strings_decoded == '':
+                    pass
+                else:
+                    odl_rows.append(odl)
+            i += 1
+            
+            header = f.read(32) # next cdef header
+            file_pos += 32
+    except (ConstructError,ConstError) as ex:
+        print(f"Exception reading structure: {ex} at filepos {file_pos} i={i}")
+    return odl_rows
+
+def process_odl(path, map, show_all_data):
+    odl_rows = []
+    odl_version = 2 # default
+    with open(path, 'rb') as f:
+        file_header = f.read(0x100)
+        odl_header = Odl_header.parse(file_header)
+        odl_version = odl_header.odl_version
+        if odl_version not in (2, 3):
+            print(f'Unknown odl_version = {odl_version}')
+            return []
+        header = odl_header.signature
+        if header[0:8] == b'EBFGONED': # Odl header
+            f.seek(0x100)
+            header = f.read(8)
+            file_pos = 0x108
+        else:
+            file_pos = 8
+        # Now either we have the gzip header here or the CDEF_xx header (compressed or uncompressed handles both)
+        if header[0:4] == b'\x1F\x8B\x08\x00': # gzip
+            try:
+                f.seek(file_pos - 8)
+                all_data = f.read()
+                z = zlib.decompressobj(31)
+                file_data = z.decompress(all_data)
+                #print(f"zlib decompressed {len(file_data)} bytes")
+            except (zlib.error, OSError) as ex:
+                print(f'..decompression error for file {path} ' + str(ex))
+                return []
+            f.close()
+            f = io.BytesIO(file_data)
+            header = f.read(8)
+        if header[0:4] != b'\xCC\xDD\xEE\xFF': # CDEF_Vx header
+            print('wrong header! Did not find 0xCCDDEEFF')
+            return []
+        else:
+            f.seek(-8, io.SEEK_CUR)
+            file_pos -= 8
+            basename = os.path.basename(path)
+            if odl_version == 2:
+                odl_rows = process_odl_v2(path, map, show_all_data, f, basename)
+            elif odl_version == 3:
+                odl_rows = process_odl_v3(path, map, show_all_data, f, basename)
+
     return odl_rows
 
 def main():
     usage = \
     """
-(c) 2021-2023 Yogesh Khatri,  @swiftforensics
+(c) 2021-2024 Yogesh Khatri,  @swiftforensics
 This script will read OneDrive sync logs. These logs are produced by 
 OneDrive, and are stored in a binary format having the extensions 
 .odl .odlgz .oldsent .aold
